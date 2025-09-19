@@ -50,7 +50,7 @@ namespace SlipEmote
 
                 // Configure the emote keybinds
 
-                AssignEmoteKeybind = Config.Bind("Keybinds", "AssignEmoteKeybind", new KeyboardShortcut(KeyCode.Tilde), "Keybind to start/cancel the process of setting an emote to an emote key.");
+                AssignEmoteKeybind = Config.Bind("Keybinds", "AssignEmoteKeybind", new KeyboardShortcut(KeyCode.F1), "Keybind to start/cancel the process of setting an emote to an emote key.");
 
                 for (int i = 0; i < defaultKeys.Count; i++)
                 {
@@ -107,7 +107,7 @@ namespace SlipEmote
                         emoteToSave = emoteController.LastEmoteUsed;
 
                         DebugLogInfo($"Starting emote assignment process for emote: {emoteToSave.Doc.Id}");
-                        RecieveOrder($"Ready to assign emote: {emoteToSave.Doc.Data.Name}. Please press the desired emote key to assign it to, or press the assign emote key again to cancel.");
+                        RecieveOrder($"Ready to assign emote: {emoteToSave.Doc.Data.Name}. Press the desired emote key to assign it to, or press this key again to cancel.");
                     } else
                     {
                         // Cancel the emote assignment process
@@ -202,8 +202,8 @@ namespace SlipEmote
             }
             catch (Exception e)
             {
-                Log.LogError("An error occurred during the Update process.");
-                Log.LogError(e.Message);
+                Log.LogError("An error occurred during the Update process. " + e.Message);
+                Log.LogError(e.StackTrace);
             }
         }
 
@@ -211,11 +211,15 @@ namespace SlipEmote
         {
             try
             {
-                //ThreadingHelper.Instance.StartSyncInvoke(() =>
-                //{
+                var localCrewmate = Mainstay<LocalCrewSelectionManager>.Main.GetSelectedLocalCrewmate();
+                if (localCrewmate == null)
+                {
+                    DebugLogWarn("Attempted to send local order, but no local crewmate is found!");
+                    return;
+                }
+                
                 OrderVo local = OrderHelpers.CreateLocal(OrderIssuer.Nobody, OrderType.General, msg);
                 Svc.Get<Subpixel.Events.Events>().Dispatch<OrderGivenEvent>(new OrderGivenEvent(local));
-                //});
             }
             catch (Exception e)
             {
