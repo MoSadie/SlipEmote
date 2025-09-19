@@ -1,0 +1,279 @@
+﻿using BepInEx;
+using BepInEx.Configuration;
+using System.Collections.Generic;
+using BepInEx.Logging;
+using UnityEngine;
+using System;
+using System.Net;
+using MoCore;
+using Subpixel;
+using Cysharp.Threading.Tasks;
+
+namespace SlipEmote
+{
+    [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
+    [BepInDependency("com.mosadie.mocore", BepInDependency.DependencyFlags.HardDependency)]
+    [BepInProcess("Slipstream_Win.exe")]
+    public class SlipEmote : BaseUnityPlugin, IMoPlugin
+    {
+        private static ConfigEntry<bool> debugLogs;
+        internal static ManualLogSource Log;
+
+        private static ConfigEntry<KeyboardShortcut> AssignEmoteKeybind;
+
+        private static List<ConfigEntry<KeyboardShortcut>> EmoteKeybindList = new List<ConfigEntry<KeyboardShortcut>>();
+        private static List<ConfigEntry<string>> EmoteKeybindAssignedEmoteList = new List<ConfigEntry<string>>();
+
+        private static List<KeyCode> defaultKeys = [
+            KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3, KeyCode.Alpha4, KeyCode.Alpha5, KeyCode.Alpha6, KeyCode.Alpha7, KeyCode.Alpha8, KeyCode.Alpha9, KeyCode.Alpha0
+            ];
+
+        private bool isSetup = false;
+        private EmoteCatalogEntry emoteToSave = null;
+
+        public static readonly string COMPATIBLE_GAME_VERSION = "4.1595";
+        public static readonly string GAME_VERSION_URL = "https://raw.githubusercontent.com/MoSadie/SlipEmote/refs/heads/main/versions.json";
+
+        private void Awake()
+        {
+            try
+            {
+                SlipEmote.Log = base.Logger;
+
+                if (!MoCore.MoCore.RegisterPlugin(this))
+                {
+                    Log.LogError("Failed to register plugin with MoCore. Please check the logs for more information.");
+                    return;
+                }
+
+                debugLogs = Config.Bind("Debug", "DebugLogs", false, "Enable additional logging for debugging");
+
+                // Configure the emote keybinds
+
+                AssignEmoteKeybind = Config.Bind("Keybinds", "AssignEmoteKeybind", new KeyboardShortcut(KeyCode.Tilde), "Keybind to start/cancel the process of setting an emote to an emote key.");
+
+                for (int i = 0; i < defaultKeys.Count; i++)
+                {
+                    var emoteKeybind = Config.Bind("Keybinds", $"EmoteKeybind{i + 1}", new KeyboardShortcut(defaultKeys[i]), $"Keybind to trigger emote key {i + 1}");
+                    EmoteKeybindList.Add(emoteKeybind);
+                    var emoteAssigned = Config.Bind("Emotes", $"Emote{i + 1}", "", $"The emote assigned to emote key {i + 1}. Leave empty for no emote.");
+                    EmoteKeybindAssignedEmoteList.Add(emoteAssigned);
+                }
+
+                Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
+                isSetup = true;
+            } catch (Exception e)
+            {
+                Log.LogError("An error occurred while starting the plugin.");
+                Log.LogError(e.Message);
+            }
+
+        }
+
+        private void Update()
+        {
+            if (!isSetup) return;
+
+            try
+            {
+                // Check if the assign emote keybind is pressed
+                if (AssignEmoteKeybind.Value.IsDown())
+                {
+                    if (emoteToSave == null)
+                    {
+                        // Check if the last emote used exists, if so set it to emoteToSave
+                        var localCrewmate = Mainstay<LocalCrewSelectionManager>.Main.GetSelectedLocalCrewmate();
+                        if (localCrewmate == null)
+                        {
+                            DebugLogWarn("Attempted to start emote assignment, but no local crewmate is found!");
+                            return;
+                        }
+
+                        if (localCrewmate.Crewmate == null || localCrewmate.Crewmate.EmoteController == null)
+                        {
+                            DebugLogWarn("Attempted to start emote assignment, but no crewmate or emote controller is found!");
+                            return;
+                        }
+
+                        var emoteController = localCrewmate.Crewmate.EmoteController;
+
+                        if (emoteController.LastEmoteUsed == null)
+                        {
+                            DebugLogWarn("Attempted to start emote assignment, but no last emote used is found! Please use an emote first, then press this key again!");
+                            RecieveOrder("Please use an emote first, then press this key again to start assigning it to an emote key!");
+                            return;
+                        }
+
+                        emoteToSave = emoteController.LastEmoteUsed;
+
+                        DebugLogInfo($"Starting emote assignment process for emote: {emoteToSave.Doc.Id}");
+                        RecieveOrder($"Ready to assign emote: {emoteToSave.Doc.Data.Name}. Please press the desired emote key to assign it to, or press the assign emote key again to cancel.");
+                    } else
+                    {
+                        // Cancel the emote assignment process
+                        DebugLogInfo("Emote key assignment cancelled.");
+                        RecieveOrder("Emote key assignment cancelled.");
+                        emoteToSave = null;
+                    }
+                }
+
+                // Check if any of the emote keybinds are pressed
+                for (int i = 0; i < EmoteKeybindList.Count; i++)
+                {
+                    if (EmoteKeybindList[i].Value.IsDown())
+                    {
+                        if (emoteToSave != null)
+                        {
+                            // Assign the emote to this keybind
+                            EmoteKeybindAssignedEmoteList[i].Value = emoteToSave.Doc.Id;
+                            Config.Save();
+                            DebugLogInfo($"Assigned emote {emoteToSave.Doc.Id} to emote key {i + 1}");
+                            RecieveOrder($"Assigned emote {emoteToSave.Doc.Data.Name} to emote key {i + 1}");
+                            emoteToSave = null;
+                        }
+
+                        var assignedEmote = EmoteKeybindAssignedEmoteList[i].Value;
+                        if (!string.IsNullOrEmpty(assignedEmote))
+                        {
+                           
+                            DebugLogInfo($"Emote Keybind {i + 1} Pressed, triggering emote: {assignedEmote}");
+
+                            // Check if the assigned emote exists and the user owns the emote
+                            var emoteInventory = Svc.Get<UserEmotesInventory>();
+
+                            if (emoteInventory == null)
+                            {
+                                Log.LogError("UserEmotesInventory service is null, cannot check owned emotes.");
+                                return;
+                            }
+
+                            var emoteOwned = emoteInventory.IsEmoteUnlocked(assignedEmote);
+
+                            if (!emoteOwned)
+                            {
+                                Log.LogError($"Attempted to trigger emote {assignedEmote}, but the user does not own this emote.");
+                                RecieveOrder($"Something went wrong triggering that emote. Please try assigning it again.");
+                                return;
+                            }
+
+                            // Trigger the assigned emote
+
+                            var localCrewmate = Mainstay<LocalCrewSelectionManager>.Main.GetSelectedLocalCrewmate();
+                            if (localCrewmate == null)
+                            {
+                                Log.LogWarning("Attempted to trigger emote, but no local crewmate is found!");
+                                return;
+                            }
+
+                            if (localCrewmate.Crewmate == null || localCrewmate.Crewmate.EmoteController == null)
+                            {
+                                Log.LogWarning("Attempted to trigger emote, but no crewmate or emote controller is found!");
+                                return;
+                            }
+
+                            var emoteController = localCrewmate.Crewmate.EmoteController;
+
+                            var staticData = Svc.Get<StaticData>();
+
+                            if (staticData == null)
+                            {
+                                Log.LogError("StaticData service is null, cannot retrieve emote data.");
+                                return;
+                            }
+
+                            var emoteCatalog = staticData.Emotes;
+
+                            if (emoteCatalog == null)
+                            {
+                                Log.LogError("Emote catalog is null, cannot retrieve emote data.");
+                                return;
+                            }
+
+                            var emoteEntry = emoteCatalog.GetEntryByEmoteId(assignedEmote);
+
+                            UniTaskExtensions.Forget<bool>(emoteController.Local_Emote(emoteEntry));
+                        }
+                        else
+                        {
+                            DebugLogInfo($"Emote Keybind {i + 1} Pressed, but no emote is assigned.");
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Log.LogError("An error occurred during the Update process.");
+                Log.LogError(e.Message);
+            }
+        }
+
+        internal static void RecieveOrder(string msg)
+        {
+            try
+            {
+                //ThreadingHelper.Instance.StartSyncInvoke(() =>
+                //{
+                OrderVo local = OrderHelpers.CreateLocal(OrderIssuer.Nobody, OrderType.General, msg);
+                Svc.Get<Subpixel.Events.Events>().Dispatch<OrderGivenEvent>(new OrderGivenEvent(local));
+                //});
+            }
+            catch (Exception e)
+            {
+                Log.LogError("An error occurred while trying to receive a local order.");
+                Log.LogError(e);
+            }
+        }
+
+        internal static void DebugLogInfo(string message)
+        {
+            if (debugLogs.Value)
+            {
+                Log.LogInfo(message);
+            }
+        }
+
+        internal static void DebugLogWarn(string message)
+        {
+            if (debugLogs.Value)
+            {
+                Log.LogWarning(message);
+            }
+        }
+
+        internal static void DebugLogError(string message)
+        {
+            if (debugLogs.Value)
+            {
+                Log.LogError(message);
+            }
+        }
+
+        internal static void DebugLogDebug(string message)
+        {
+            if (debugLogs.Value)
+            {
+                Log.LogDebug(message);
+            }
+        }
+
+        public string GetCompatibleGameVersion()
+        {
+            return COMPATIBLE_GAME_VERSION;
+        }
+
+        public string GetVersionCheckUrl()
+        {
+            return GAME_VERSION_URL;
+        }
+
+        public BaseUnityPlugin GetPluginObject()
+        {
+            return this;
+        }
+
+        public IMoHttpHandler GetHttpHandler()
+        {
+            return null;
+        }
+    }
+}

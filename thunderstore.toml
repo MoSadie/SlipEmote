@@ -1,0 +1,34 @@
+[config]
+schemaVersion = "0.0.1"
+
+[package]
+namespace = "MoSadie"
+name = "SlipEmote"
+description = "Add keybinds for your favorite emotes!"
+websiteUrl = "https://github.com/MoSadie/SlipEmote"
+containsNsfwContent = false
+[package.dependencies]
+BepInEx-BepInExPack= "5.4.2100"
+MoSadie-MoCore= "2.0.2"
+
+
+[build]
+icon = "./icon.png"
+readme = "./README.md"
+outdir = "./build"
+
+[[build.copy]]
+source = "./SlipEmote/bin/Release/netstandard2.1/com.mosadie.slipemote.dll"
+target = "BepInEx/plugins/MoSadie-SlipEmote/com.mosadie.slipemote.dll"
+
+[[build.copy]]
+source = "./CHANGELOG.md"
+target = "./CHANGELOG.md"
+
+[publish]
+repository = "https://thunderstore.io"
+communities = [ "slipstream-rogue-space", ]
+[publish.categories]
+slipstream-rogue-space = [ "mods" ]
+
+
