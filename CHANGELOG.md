@@ -10,6 +10,6 @@ All configuration options can be found in the README, but here's a quick summary
 
 1) Load onto any ship
 2) Use an emote
-3) Press the `~` key to start binding the emote to a key
-4) Press the emote key you want to bind the emote to (0-9 on the number row) (Or press `~` again to cancel)
+3) Press the `F1` key to start binding the emote to a key
+4) Press the emote key you want to bind the emote to (0-9 on the number row) (Or press `F1` again to cancel)
 5) Emote!
