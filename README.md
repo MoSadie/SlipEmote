@@ -9,7 +9,7 @@ Emote Keybind plugin for [Slipstream: Rogue Space](https://playslipstream.com).
 
 ## (Quick) Setup Video
 
-(video soon!)
+https://youtu.be/Ck3apqf9j2Y
 
 ## Installation
 
