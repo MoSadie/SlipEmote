@@ -19,7 +19,7 @@ Emote Keybind plugin for [Slipstream: Rogue Space](https://playslipstream.com).
 4) In the "Online" tab look for SlipEmote and click it. Then click "Download"
 5) Launch Slipstream using the "Start modded" button
 6) Once on a ship, use an emote, so pressing the quick emote keybind causes you to emote.
-7) Press `~` to start the emote binding process, then the number key you want to bind it to. You'll see a notification for each step of the process. (Or press `~` again to cancel)
+7) Press `F1` to start the emote binding process, then the number key you want to bind it to. You'll see a notification for each step of the process. (Or press `F1` again to cancel)
 8) Emote!
 
 ## Configuration Options
@@ -34,11 +34,11 @@ Enables additional debug loggings to help diagnose issues. Default: `false`
 
 #### AssignEmoteKeybind
 
-The key used for starting the emote binding process. Default: `Tilde` (`~`)
+The key used for starting the emote binding process. Default: `F1`
 
 #### EmoteKeybind{1-10}
 
-The keybinds for emotes keys 1-10. Default: Number row keys (`1-0`)
+The keybinds for emotes keys 1-10. Default: Number row keys (`Alpha1`, `Alpha2`, ..., `Alpha9`, `Alpha0`)
 
 ### Emotes
 
