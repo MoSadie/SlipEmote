@@ -8,16 +8,19 @@ using System.Net;
 using MoCore;
 using Subpixel;
 using Cysharp.Threading.Tasks;
+using System.Linq;
 
 namespace SlipEmote
 {
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
     [BepInDependency("com.mosadie.mocore", BepInDependency.DependencyFlags.HardDependency)]
     [BepInProcess("Slipstream_Win.exe")]
-    public class SlipEmote : BaseUnityPlugin, IMoPlugin
+    public class SlipEmote : BaseUnityPlugin, IMoPlugin, IMoHttpHandler
     {
         private static ConfigEntry<bool> debugLogs;
         internal static ManualLogSource Log;
+
+        private static ConfigEntry<bool> EnableHTTPEmotes;
 
         private static ConfigEntry<KeyboardShortcut> AssignEmoteKeybind;
 
@@ -30,6 +33,8 @@ namespace SlipEmote
 
         private bool isSetup = false;
         private EmoteCatalogEntry emoteToSave = null;
+
+        public static readonly string HTTP_PREFIX = "slipemote";
 
         public static readonly string COMPATIBLE_GAME_VERSION = "4.1595";
         public static readonly string GAME_VERSION_URL = "https://raw.githubusercontent.com/MoSadie/SlipEmote/refs/heads/main/versions.json";
@@ -47,6 +52,8 @@ namespace SlipEmote
                 }
 
                 debugLogs = Config.Bind("Debug", "DebugLogs", false, "Enable additional logging for debugging");
+
+                EnableHTTPEmotes = Config.Bind("HTTP", "EnableHTTPEmotes", false, "Enable the ability to trigger emotes via HTTP requests. This will allow external programs to attempt to use emotes.");
 
                 // Configure the emote keybinds
 
@@ -138,60 +145,7 @@ namespace SlipEmote
                            
                             DebugLogInfo($"Emote Keybind {i + 1} Pressed, triggering emote: {assignedEmote}");
 
-                            // Check if the assigned emote exists and the user owns the emote
-                            var emoteInventory = Svc.Get<UserEmotesInventory>();
-
-                            if (emoteInventory == null)
-                            {
-                                Log.LogError("UserEmotesInventory service is null, cannot check owned emotes.");
-                                return;
-                            }
-
-                            var emoteOwned = emoteInventory.IsEmoteUnlocked(assignedEmote);
-
-                            if (!emoteOwned)
-                            {
-                                Log.LogError($"Attempted to trigger emote {assignedEmote}, but the user does not own this emote.");
-                                RecieveOrder($"Something went wrong triggering that emote. Please try assigning it again.");
-                                return;
-                            }
-
-                            // Trigger the assigned emote
-
-                            var localCrewmate = Mainstay<LocalCrewSelectionManager>.Main.GetSelectedLocalCrewmate();
-                            if (localCrewmate == null)
-                            {
-                                Log.LogWarning("Attempted to trigger emote, but no local crewmate is found!");
-                                return;
-                            }
-
-                            if (localCrewmate.Crewmate == null || localCrewmate.Crewmate.EmoteController == null)
-                            {
-                                Log.LogWarning("Attempted to trigger emote, but no crewmate or emote controller is found!");
-                                return;
-                            }
-
-                            var emoteController = localCrewmate.Crewmate.EmoteController;
-
-                            var staticData = Svc.Get<StaticData>();
-
-                            if (staticData == null)
-                            {
-                                Log.LogError("StaticData service is null, cannot retrieve emote data.");
-                                return;
-                            }
-
-                            var emoteCatalog = staticData.Emotes;
-
-                            if (emoteCatalog == null)
-                            {
-                                Log.LogError("Emote catalog is null, cannot retrieve emote data.");
-                                return;
-                            }
-
-                            var emoteEntry = emoteCatalog.GetEntryByEmoteId(assignedEmote);
-
-                            UniTaskExtensions.Forget<bool>(emoteController.Local_Emote(emoteEntry));
+                            TryEmote(assignedEmote);
                         }
                         else
                         {
@@ -205,6 +159,65 @@ namespace SlipEmote
                 Log.LogError("An error occurred during the Update process. " + e.Message);
                 Log.LogError(e.StackTrace);
             }
+        }
+
+        internal static bool TryEmote(string emoteId)
+        {
+            // Check if the assigned emote exists and the user owns the emote
+            var emoteInventory = Svc.Get<UserEmotesInventory>();
+
+            if (emoteInventory == null)
+            {
+                Log.LogError("UserEmotesInventory service is null, cannot check owned emotes.");
+                return false;
+            }
+
+            var emoteOwned = emoteInventory.IsEmoteUnlocked(emoteId);
+
+            if (!emoteOwned)
+            {
+                Log.LogError($"Attempted to trigger emote {emoteId}, but the user does not own this emote.");
+                RecieveOrder($"Something went wrong triggering that emote. Please try assigning it again.");
+                return false;
+            }
+
+            // Trigger the assigned emote
+
+            var localCrewmate = Mainstay<LocalCrewSelectionManager>.Main.GetSelectedLocalCrewmate();
+            if (localCrewmate == null)
+            {
+                Log.LogWarning("Attempted to trigger emote, but no local crewmate is found!");
+                return false;
+            }
+
+            if (localCrewmate.Crewmate == null || localCrewmate.Crewmate.EmoteController == null)
+            {
+                Log.LogWarning("Attempted to trigger emote, but no crewmate or emote controller is found!");
+                return false;
+            }
+
+            var emoteController = localCrewmate.Crewmate.EmoteController;
+
+            var staticData = Svc.Get<StaticData>();
+
+            if (staticData == null)
+            {
+                Log.LogError("StaticData service is null, cannot retrieve emote data.");
+                return false;
+            }
+
+            var emoteCatalog = staticData.Emotes;
+
+            if (emoteCatalog == null)
+            {
+                Log.LogError("Emote catalog is null, cannot retrieve emote data.");
+                return false;
+            }
+
+            var emoteEntry = emoteCatalog.GetEntryByEmoteId(emoteId);
+
+            UniTaskExtensions.Forget<bool>(emoteController.Local_Emote(emoteEntry));
+            return true;
         }
 
         internal static void RecieveOrder(string msg)
@@ -277,7 +290,167 @@ namespace SlipEmote
 
         public IMoHttpHandler GetHttpHandler()
         {
-            return null;
+            return this;
+        }
+
+        public string GetPrefix()
+        {
+            return HTTP_PREFIX;
+        }
+
+        public HttpListenerResponse HandleRequest(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            DebugLogInfo("Handling request.");
+            try
+            {
+                HttpStatusCode status;
+                string responseString;
+
+                string pathUrl = request.RawUrl.Split('?', 2)[0];
+
+                if (pathUrl.ToLower().Equals($"/{HTTP_PREFIX}/emotes"))
+                {
+                    DebugLogInfo("Attempting to list available emotes");
+
+                    // Get owned emotes
+                    var emoteInventory = Svc.Get<UserEmotesInventory>();
+
+                    if (emoteInventory == null)
+                    {
+                        Log.LogError("UserEmotesInventory service is null, cannot check owned emotes.");
+                        status = HttpStatusCode.InternalServerError;
+                        responseString = "{\"error\": \"Unable to get user emote inventory\"}";
+                    }
+                    else
+                    {
+                        EmotesCatalog emoteCatalog = Svc.Get<StaticData>().Emotes;
+
+                        if (emoteCatalog == null)
+                        {
+                            Log.LogError("Failed to get emote catalog.");
+                            status = HttpStatusCode.InternalServerError;
+                            responseString = "{\"error\": \"Unable to get emote catalog\"}";
+                        }
+                        else
+                        {
+                            var emotes = new Dictionary<string, EmoteModel>();
+
+                            foreach (string emoteId in emoteInventory.UnlockedEmoteIds)
+                            {
+                                var emoteCatalogEntry = emoteCatalog.GetEntryByEmoteId(emoteId);
+                                if (emoteCatalogEntry == null)
+                                {
+                                    Log.LogWarning($"Emote with ID {emoteId} is unlocked but not found in the emote catalog.");
+                                    continue;
+                                }
+
+                                emotes.Add(emoteId, emoteCatalogEntry.Doc.Data);
+                            }
+
+                            status = HttpStatusCode.OK;
+                            responseString = Newtonsoft.Json.JsonConvert.SerializeObject(new { emotes });
+                        }
+                    }
+                }
+                else if (pathUrl.ToLower().Equals($"/{HTTP_PREFIX}/allemotes"))
+                {
+                    EmotesCatalog emoteCatalog = Svc.Get<StaticData>().Emotes;
+
+                    if (emoteCatalog == null)
+                    {
+                        Log.LogError("Failed to get emote catalog.");
+                        status = HttpStatusCode.InternalServerError;
+                        responseString = "{\"error\": \"Unable to get emote catalog\"}";
+                    }
+                    else
+                    {
+                        var emoteInventory = Svc.Get<UserEmotesInventory>();
+
+                        if (emoteInventory == null)
+                        {
+                            Log.LogError("UserEmotesInventory service is null, cannot check owned emotes.");
+                            status = HttpStatusCode.InternalServerError;
+                            responseString = "{\"error\": \"Unable to get user emote inventory\"}";
+                        }
+                        else
+                        {
+                            var emotes = new Dictionary<string, EmoteModel>();
+                            foreach (var emoteEntry in emoteCatalog.GetAllEntriesBySortOrder())
+                            {
+                                if (EmotesHelpers.ShouldShowInShopForUser(emoteCatalog, emoteInventory, emoteEntry))
+                                    emotes.Add(emoteEntry.Doc.Id, emoteEntry.Doc.Data);
+                            }
+                            status = HttpStatusCode.OK;
+                            responseString = Newtonsoft.Json.JsonConvert.SerializeObject(new { emotes });
+                        }
+                    }
+                }
+                else if (pathUrl.ToLower().StartsWith($"/{HTTP_PREFIX}/tryemote"))
+                {
+                    if (!EnableHTTPEmotes.Value)
+                    {
+                        DebugLogWarn("tryemote endpoint called, but HTTP emotes are disabled in the config.");
+                        status = HttpStatusCode.Forbidden;
+                        responseString = "{\"error\": \"HTTP emotes are disabled in the config\"}";
+                    }
+                    else if (request.QueryString.AllKeys.Contains("emoteId"))
+                    {
+                        var emoteId = request.QueryString["emoteId"];
+
+                        if (emoteId == null)
+                        {
+                            Log.LogWarning("tryemote endpoint called with null emoteId query parameter.");
+                            status = HttpStatusCode.BadRequest;
+                            responseString = "{\"error\": \"Invalid emoteId query parameter\"}";
+                        }
+                        else
+                        {
+                            DebugLogInfo($"Attempting to trigger emote with ID: {emoteId}");
+                            status = HttpStatusCode.OK;
+                            responseString = "{\"message\": \"Attempted to trigger emote\"}";
+
+                            ThreadingHelper.Instance.StartSyncInvoke(() =>
+                            {
+                                TryEmote(emoteId);
+                            });
+                        }
+                    }
+                    else
+                    {
+                        Log.LogWarning("tryemote endpoint called without emoteId query parameter.");
+                        status = HttpStatusCode.BadRequest;
+                        responseString = "{\"error\": \"Missing emoteId query parameter\"}";
+                    }
+                }
+                else
+                {
+                    status = HttpStatusCode.NotFound;
+                    responseString = "{\"error\": \"Endpoint not found\"}";
+                }
+
+                response.StatusCode = (int)status;
+                response.Headers.Add("Content-Type", "application/json");
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(responseString);
+                response.ContentLength64 = buffer.Length;
+                response.OutputStream.Write(buffer, 0, buffer.Length);
+                response.OutputStream.Close();
+                DebugLogInfo($"Request handled with status code: {status}");
+            }
+            catch (Exception e)
+            {
+                Log.LogError("An error occurred while handling the HTTP request.");
+                Log.LogError(e.Message);
+                Log.LogError(e.StackTrace);
+                response.StatusCode = (int)HttpStatusCode.InternalServerError;
+                response.Headers.Add("Content-Type", "application/json");
+                byte[] buffer = System.Text.Encoding.UTF8.GetBytes("{\"error\": \"Internal server error\"}");
+                response.ContentLength64 = buffer.Length;
+                response.OutputStream.Write(buffer, 0, buffer.Length);
+                response.OutputStream.Close();
+                return response;
+            }
+
+            return response;
         }
     }
 }
