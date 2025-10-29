@@ -177,13 +177,21 @@ namespace SlipEmote
             if (!emoteOwned)
             {
                 Log.LogError($"Attempted to trigger emote {emoteId}, but the user does not own this emote.");
-                RecieveOrder($"Something went wrong triggering that emote. Please try assigning it again.");
                 return false;
             }
 
             // Trigger the assigned emote
 
-            var localCrewmate = Mainstay<LocalCrewSelectionManager>.Main.GetSelectedLocalCrewmate();
+            var localCrewManager = Mainstay<LocalCrewSelectionManager>.Main;
+
+            if (localCrewManager == null)
+            {
+                Log.LogWarning("Attempted to trigger emote, but LocalCrewSelectionManager is null! (Likely not on ship!)");
+                return false;
+            }
+
+            var localCrewmate = localCrewManager.GetSelectedLocalCrewmate();
+
             if (localCrewmate == null)
             {
                 Log.LogWarning("Attempted to trigger emote, but no local crewmate is found!");
